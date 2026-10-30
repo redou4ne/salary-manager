@@ -1,4 +1,4 @@
-const CACHE = "salary-manager-1.0.0";
+const CACHE = "salary-manager-1.0.1";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icons/apple-touch-icon.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png", "./fonts/bricolage-500.woff2", "./fonts/bricolage-700.woff2", "./fonts/public-400.woff2", "./fonts/public-500.woff2", "./fonts/public-600.woff2", "./fonts/public-700.woff2"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

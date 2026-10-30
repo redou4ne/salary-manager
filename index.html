@@ -304,7 +304,7 @@ const looseDeposits=m.imported?0:sum(SV.filter(e=>e.kind==="deposit"&&!e.fromLef
 const takenTotal=sum(rows,r=>r.taken)+unplannedSum+looseDeposits;
 const leftToTake=sum(rows,r=>r.left);
 return { m, rows, W, SV, incomeSum, fromSavings, available, planned, unplanned, unplannedSum,
-takenTotal, leftToTake, inBank: available-takenTotal, overPlan: planned-available,
+takenTotal, leftToTake, inBank: available-takenTotal, overPlan: planned-available, spare: available-planned-unplannedSum,
 saved: savedDeposits };
 }
 function savingsBalance(uptoKey){ return sum(S.savings.filter(e=>!uptoKey||e.month<=uptoKey),e=>Number(e.amount)||0); }
@@ -401,8 +401,9 @@ h+='<div class="card summary">'+
 '<div class="stat"><div class="k">Planned</div><div class="v">'+money(c.planned)+'</div></div>'+
 '<div class="stat"><div class="k">Withdrawn</div><div class="v">'+money(c.takenTotal)+'</div></div>'+
 '</div>';
-if(c.overPlan>0) h+='<div class="alert">Your plan is '+money(c.overPlan)+' over your money in.</div>';
-else if(!m.imported) h+='<div class="hint" style="font-size:13px;color:var(--muted)">Not planned yet: '+money(-c.overPlan)+' · Still in the bank: '+money(c.inBank)+'</div>';
+if(c.overPlan>0) h+='<div class="alert">Your plan is '+money(c.overPlan)+' over your money in.'+(c.unplannedSum?' Unplanned withdrawals add '+money(c.unplannedSum)+' more.':'')+'</div>';
+else if(!m.imported&&c.spare<0) h+='<div class="alert">Unplanned withdrawals ('+money(c.unplannedSum)+') are '+money(-c.spare)+' more than your spare money. That amount now comes from your planned charges.</div>';
+else if(!m.imported) h+='<div class="hint" style="font-size:13px;color:var(--muted)">Not planned yet: '+money(c.spare)+(c.unplannedSum?' (after '+money(c.unplannedSum)+' unplanned)':'')+' · Still in the bank: '+money(c.inBank)+'</div>';
 h+='</div>';
 if(!m.imported){
 h+='<div class="btn-row"><button class="btn" data-act="unplanned">+ Unplanned withdrawal</button><button class="btn" data-act="income">+ Extra income</button><button class="btn" data-act="edit-plan">Edit plan</button></div>';
@@ -495,7 +496,7 @@ const lb=S.settings&&S.settings.lastBackupAt;
 h+='<div class="card summary"><div><h2>Backup</h2><p style="color:var(--muted);margin:6px 0 0">Your money data is saved only on this phone. Save a backup now and then and keep it in Google Drive or WhatsApp. On a new phone, tap Restore backup.</p>'+
 '<p style="margin:8px 0 0;font-size:13px;font-weight:600;color:'+(backupDue()?"var(--warn)":"var(--muted)")+'">'+(lb?"Last backup: "+esc(new Date(lb).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})):"No backup saved yet")+'</p></div>'+
 '<div class="btn-row"><button class="btn primary" data-act="backup">Save backup</button><button class="btn" data-act="import">Restore backup</button><button class="btn" data-act="export">Export to CSV</button></div>'+
-'<p style="margin:0;font-size:12px;color:var(--muted)">Works offline \u00b7 version 1.0.0</p></div>';
+'<p style="margin:0;font-size:12px;color:var(--muted)">Works offline \u00b7 version 1.0.1</p></div>';
 el.innerHTML=h; bind(el);
 }
 function backupDue(){ const lb=S.settings&&S.settings.lastBackupAt; return !lb || (Date.now()-new Date(lb).getTime()) > 14*864e5; }
@@ -594,11 +595,13 @@ if(ok) closeSheet(); else $("w-go").disabled=false;
 });
 }
 function sheetUnplanned(k){
-openSheet('<h2>Unplanned withdrawal</h2><p class="hint">For money taken out that isn’t in your plan.</p>'+
+const cc=calc(k);
+openSheet('<h2>Unplanned withdrawal</h2><p class="hint">For money taken out that isn’t in your plan. It comes from your spare money: '+money(Math.max(cc.spare,0))+' left.</p>'+
 '<div class="field"><label for="u-amt">Amount ('+CUR+')</label><input class="input big-in" id="u-amt" inputmode="decimal" autocomplete="off"></div>'+
 '<div class="field"><label for="u-note">What was it for?</label><input class="input" id="u-note" autocomplete="off" placeholder="e.g. taxi, doctor"></div>'+dateField("u-at")+
 '<div class="err" id="u-err"></div><div class="btn-row"><button class="btn paid" id="u-go">Record withdrawal</button><button class="btn ghost" data-close>Cancel</button></div>',
-()=>{ $("u-go").addEventListener("click",async()=>{
+()=>{ $("u-amt").addEventListener("input",()=>{ const v=num($("u-amt").value); $("u-err").textContent = v>0&&v>Math.max(cc.spare,0) ? "That is "+fmt(v-Math.max(cc.spare,0))+" "+CUR+" more than your spare money. It will come from your planned charges. You can still save it." : ""; });
+$("u-go").addEventListener("click",async()=>{
 const v=num($("u-amt").value), note=$("u-note").value.trim();
 if(!(v>0)){ $("u-err").textContent="Enter an amount above 0."; return; }
 if(!note){ $("u-err").textContent="Write what it was for, so you can recognise it later."; return; }
