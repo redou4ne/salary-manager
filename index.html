@@ -174,6 +174,13 @@ table.hist{width:100%;border-collapse:collapse;font-size:14px}
 .plan-row{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .plan-row .wide{grid-column:1 / -1;display:flex;gap:8px;align-items:center}
 .plan-row select{flex:1;min-width:0}
+.parts-edit{grid-column:1 / -1;display:flex;flex-direction:column;gap:6px;padding-left:12px;border-left:2px solid var(--line)}
+.parts-edit:empty{display:none}
+.part-row{display:grid;grid-template-columns:minmax(0,1fr) 88px auto;gap:6px;align-items:center}
+.plan-row.is-split [data-f="planned"]{background:var(--sunk);color:var(--muted)}
+.parts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.part{font-size:12px;font-weight:500;color:var(--muted);background:var(--sunk);padding:2px 8px;border-radius:999px}
+.part.done{color:var(--paid);background:var(--paid-soft)}
 .radio{display:flex;gap:10px;align-items:flex-start;padding:8px 0}
 .radio input{margin-top:4px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:14px;max-width:calc(100% - 32px)}
@@ -293,8 +300,14 @@ let taken;
 if(m.imported) taken=Number(c.planned)||0;
 else if(c.type==="savings") taken=sum(SV.filter(e=>e.kind==="deposit"&&e.chargeId===c.id),e=>Number(e.amount)||0);
 else taken=sum(W.filter(w=>w.chargeId===c.id),w=>Number(w.amount)||0);
-const p=Number(c.planned)||0;
-return {...c, planned:p, taken, left:Math.max(p-taken,0), over:Math.max(taken-p,0), done: p>0 ? taken>=p : taken>0};
+// a split charge (e.g. Rent & bills = Rent + Electricity bill): one bar, each part withdrawn on its own
+const parts=(c.parts&&c.parts.length&&c.type!=="savings")?c.parts.map(pt=>{
+const pp=Number(pt.planned)||0;
+const t=m.imported?pp:sum(W.filter(w=>w.chargeId===c.id&&w.partId===pt.id),w=>Number(w.amount)||0);
+return {...pt, planned:pp, taken:t, left:Math.max(pp-t,0), over:Math.max(t-pp,0), done: pp>0 ? t>=pp : t>0};
+}):null;
+const p=parts?sum(parts,x=>x.planned):(Number(c.planned)||0);
+return {...c, parts, planned:p, taken, left:Math.max(p-taken,0), over:Math.max(taken-p,0), done: p>0 ? taken>=p : taken>0};
 });
 const unplanned=W.filter(w=>!w.chargeId||!charges.some(c=>c.id===w.chargeId));
 const unplannedSum=sum(unplanned,w=>Number(w.amount)||0);
@@ -425,8 +438,10 @@ h+='<div><div class="sec-head"><h2>Still to withdraw</h2><span class="meta">'+to
 todo.map(r=>{
 const act=r.type==="savings"
 ? '<button class="btn small save" data-act="withdraw" data-id="'+esc(r.id)+'">Move to savings</button>'
+: r.parts
+? r.parts.filter(pt=>!pt.done).map(pt=>'<button class="btn small '+(r.type==="envelope"?"":"paid")+'" data-act="withdraw" data-id="'+esc(r.id)+'" data-part="'+esc(pt.id)+'">'+esc(pt.name)+' '+fmt(pt.left)+'</button>').join("")
 : '<button class="btn small '+(r.type==="envelope"?"":"paid")+'" data-act="withdraw" data-id="'+esc(r.id)+'">'+(r.type==="envelope"?"Take some":"Withdraw "+fmt(r.left))+'</button>';
-return '<div class="row"><div class="name">'+esc(r.name)+'<span class="tags">'+typeTag(r.type)+'</span>'+(r.note?'<div class="note">'+esc(r.note)+'</div>':'')+'</div>'+
+return '<div class="row"><div class="name">'+esc(r.name)+'<span class="tags">'+typeTag(r.type)+'</span>'+(r.note?'<div class="note">'+esc(r.note)+'</div>':'')+partsLine(r)+'</div>'+
 '<div class="amt">'+fmt(r.left)+' left<span class="of">'+fmt(r.taken)+' of '+fmt(r.planned)+'</span></div>'+chargeBar(r)+'<div class="actions">'+act+'</div></div>';
 }).join("")+'</div></div>';
 } else if(!m.imported && c.rows.length){
@@ -434,9 +449,9 @@ h+='<div class="card empty"><h2>Everything is withdrawn</h2><p>Every charge for 
 }
 if(done.length){
 h+='<div><div class="sec-head"><h2>'+(m.imported?"Plan":"Done")+'</h2><span class="meta">'+money(sum(done,r=>r.taken))+'</span></div><div class="card list">'+
-done.map(r=>'<div class="row done"><div class="name">'+esc(r.name)+'<span class="tags">'+(m.imported?typeTag(r.type):(r.type==="savings"?'<span class="pill save">Saved</span>':'<span class="pill paid">Withdrawn</span>'))+(r.over?'<span class="pill warn">+'+fmt(r.over)+' over</span>':'')+'</span></div>'+
+done.map(r=>'<div class="row done"><div class="name">'+esc(r.name)+'<span class="tags">'+(m.imported?typeTag(r.type):(r.type==="savings"?'<span class="pill save">Saved</span>':'<span class="pill paid">Withdrawn</span>'))+(r.over?'<span class="pill warn">+'+fmt(r.over)+' over</span>':'')+'</span>'+partsLine(r)+'</div>'+
 '<div class="amt">'+fmt(r.taken)+'<span class="of">planned '+fmt(r.planned)+'</span></div>'+
-(!m.imported&&r.type==="envelope"?'<div class="actions"><button class="btn small ghost" data-act="withdraw" data-id="'+esc(r.id)+'">Take more</button></div>':'')+'</div>').join("")+'</div></div>';
+(!m.imported&&r.type==="envelope"&&!r.parts?'<div class="actions"><button class="btn small ghost" data-act="withdraw" data-id="'+esc(r.id)+'">Take more</button></div>':'')+'</div>').join("")+'</div></div>';
 }
 // extra income
 if((m.income||[]).length){
@@ -445,7 +460,7 @@ m.income.map(i=>'<div class="row"><div class="name">'+esc(i.name)+'</div><div cl
 }
 // log
 if(!m.imported){
-const log=[...c.W.map(w=>({kind:"w",id:w.id,at:w.at,imported:w.imported,amount:w.amount,note:w.note,label:labelFor(m,w.chargeId,w.note)})),
+const log=[...c.W.map(w=>({kind:"w",id:w.id,at:w.at,imported:w.imported,amount:w.amount,note:w.note,label:labelFor(m,w.chargeId,w.note,w.partId)})),
 ...c.SV.map(e=>({kind:"s",id:e.id,at:e.at,imported:e.imported,amount:e.amount,note:e.reason,label:e.kind==="deposit"?"To savings":(e.kind==="withdraw"?"From savings":"Savings correction")}))]
 .sort((a,b)=>String(b.at||"").localeCompare(String(a.at||"")));
 h+='<div><div class="sec-head"><h2>Withdrawal log</h2><span class="meta">'+log.length+' entries</span></div>';
@@ -459,9 +474,15 @@ if(isCur&&backupDue()) h+='<div class="alert" style="display:flex;gap:10px;align
 if(isCur&&!m.imported) h+='<div class="card summary"><div><h2>Month finished?</h2><p class="hint" style="color:var(--muted);margin:6px 0 0">Start '+esc(monthLabel(addMonths(k,1)))+' with the same charges. You can change amounts before saving.</p></div><div class="btn-row"><button class="btn primary" data-act="new-month">Start '+esc(monthLabel(addMonths(k,1)))+'</button></div></div>';
 el.innerHTML=h; bind(el);
 }
-function labelFor(m,chargeId,note){
+function labelFor(m,chargeId,note,partId){
 const ch=(m.charges||[]).find(c=>c.id===chargeId);
-return ch?ch.name:("Unplanned"+(note?": "+note:""));
+if(!ch) return "Unplanned"+(note?": "+note:"");
+const pt=partId&&ch.parts?ch.parts.find(x=>x.id===partId):null;
+return ch.name+(pt?" \u00b7 "+pt.name:"");
+}
+function partsLine(r){
+if(!r.parts) return "";
+return '<div class="parts">'+r.parts.map(pt=>'<span class="part'+(pt.done?' done':'')+'">'+esc(pt.name)+' '+(pt.done?'\u2713 '+fmt(pt.taken):fmt(pt.left)+' left')+'</span>').join("")+'</div>';
 }
 /* ---------- savings view ---------- */
 function renderSavings(){
@@ -506,7 +527,7 @@ const lb=S.settings&&S.settings.lastBackupAt;
 h+='<div class="card summary"><div><h2>Backup</h2><p style="color:var(--muted);margin:6px 0 0">Your money data is saved only on this phone. Save a backup now and then and keep it in Google Drive or WhatsApp. On a new phone, tap Restore backup.</p>'+
 '<p style="margin:8px 0 0;font-size:13px;font-weight:600;color:'+(backupDue()?"var(--warn)":"var(--muted)")+'">'+(lb?"Last backup: "+esc(new Date(lb).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})):"No backup saved yet")+'</p></div>'+
 '<div class="btn-row"><button class="btn primary" data-act="backup">Save backup</button><button class="btn" data-act="import">Restore backup</button><button class="btn" data-act="export">Export to CSV</button></div>'+
-'<p style="margin:0;font-size:12px;color:var(--muted)">Works offline \u00b7 version 1.0.3</p></div>';
+'<p style="margin:0;font-size:12px;color:var(--muted)">Works offline \u00b7 version 1.0.4</p></div>';
 el.innerHTML=h; bind(el);
 }
 function backupDue(){ const lb=S.settings&&S.settings.lastBackupAt; return !lb || (Date.now()-new Date(lb).getTime()) > 14*864e5; }
@@ -541,7 +562,7 @@ if(b.tagName==="TR") b.addEventListener("keydown",e=>{ if(e.key==="Enter") act(b
 }
 function act(a,id,btn){
 const k=S.viewKey;
-if(a==="withdraw") return sheetWithdraw(k,id);
+if(a==="withdraw") return sheetWithdraw(k,id,btn&&btn.dataset.part);
 if(a==="unplanned") return sheetUnplanned(k);
 if(a==="income") return sheetIncome(k);
 if(a==="edit-plan") return sheetPlan(k);
@@ -576,22 +597,25 @@ $("backdrop").addEventListener("click",e=>{ if(e.target===$("backdrop")) closeSh
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!$("backdrop").hidden) closeSheet(); });
 function dateField(id){ return '<div class="field"><label for="'+id+'">When</label><input class="input" type="datetime-local" id="'+id+'" value="'+localNow()+'"></div>'; }
 function readDate(id){ const v=$(id).value; const d=v?new Date(v):new Date(); return isNaN(d)?new Date().toISOString():d.toISOString(); }
-function sheetWithdraw(k,chargeId){
+function sheetWithdraw(k,chargeId,partId){
 const c=calc(k); const r=c.rows.find(x=>x.id===chargeId); if(!r) return;
+const pt=partId&&r.parts?r.parts.find(x=>x.id===partId):null;
+if(r.parts&&!pt) return;
+const t=pt||r;
 const isSave=r.type==="savings";
-const chips=r.type==="envelope"?[50,100,200].filter(v=>v<=Math.max(r.left,200)):[];
+const chips=r.type==="envelope"?[50,100,200].filter(v=>v<=Math.max(t.left,200)):[];
 openSheet(
-'<h2>'+(isSave?"Move to savings":"Withdraw")+' · '+esc(r.name)+'</h2>'+
-'<p class="hint">'+fmt(r.taken)+' of '+fmt(r.planned)+' '+CUR+' taken. '+fmt(r.left)+' '+CUR+' left.</p>'+
-'<div class="field"><label for="w-amt">Amount ('+CUR+')</label><input class="input big-in" id="w-amt" inputmode="decimal" autocomplete="off" value="'+(r.type==="envelope"?"":(r.left||""))+'"></div>'+
-'<div class="chips">'+chips.map(v=>'<button class="chip" data-chip="'+v+'">'+v+'</button>').join("")+(r.left?'<button class="chip" data-chip="'+r.left+'">All left ('+fmt(r.left)+')</button>':'')+'</div>'+
+'<h2>'+(isSave?"Move to savings":"Withdraw")+' · '+esc(r.name)+(pt?' \u2014 '+esc(pt.name):'')+'</h2>'+
+'<p class="hint">'+fmt(t.taken)+' of '+fmt(t.planned)+' '+CUR+' taken. '+fmt(t.left)+' '+CUR+' left.</p>'+
+'<div class="field"><label for="w-amt">Amount ('+CUR+')</label><input class="input big-in" id="w-amt" inputmode="decimal" autocomplete="off" value="'+(r.type==="envelope"?"":(t.left||""))+'"></div>'+
+'<div class="chips">'+chips.map(v=>'<button class="chip" data-chip="'+v+'">'+v+'</button>').join("")+(t.left?'<button class="chip" data-chip="'+t.left+'">All left ('+fmt(t.left)+')</button>':'')+'</div>'+
 dateField("w-at")+
 '<div class="field"><label for="w-note">Note (optional)</label><input class="input" id="w-note" autocomplete="off" placeholder="'+(isSave?"e.g. salary day":"e.g. second gaz top-up")+'"></div>'+
 '<div class="err" id="w-err"></div>'+
 '<div class="btn-row"><button class="btn '+(isSave?"save":"paid")+'" id="w-go">'+(isSave?"Move to savings":"Record withdrawal")+'</button><button class="btn ghost" data-close>Cancel</button></div>',
 sh=>{
 sh.querySelectorAll("[data-chip]").forEach(b=>b.addEventListener("click",()=>{ $("w-amt").value=b.dataset.chip; check(); }));
-const check=()=>{ const v=num($("w-amt").value); $("w-err").textContent = v>r.left&&r.left>=0&&!isNaN(v)&&v>0 ? "That is "+fmt(v-r.left)+" "+CUR+" more than planned. You can still save it." : ""; };
+const check=()=>{ const v=num($("w-amt").value); $("w-err").textContent = v>t.left&&t.left>=0&&!isNaN(v)&&v>0 ? "That is "+fmt(v-t.left)+" "+CUR+" more than planned. You can still save it." : ""; };
 $("w-amt").addEventListener("input",check);
 $("w-go").addEventListener("click",async()=>{
 const v=num($("w-amt").value); if(!(v>0)){ $("w-err").textContent="Enter an amount above 0."; return; }
@@ -599,7 +623,7 @@ $("w-go").disabled=true;
 const at=readDate("w-at"), note=$("w-note").value.trim();
 const ok = isSave
 ? await write(()=>S.db.collection("savings").add({month:k,chargeId:r.id,kind:"deposit",amount:v,at,reason:note||("Savings from "+monthLabel(k)+" salary"),createdAt:new Date().toISOString()}), fmt(v)+" "+CUR+" moved to savings")
-: await write(()=>S.db.collection("withdrawals").add({month:k,chargeId:r.id,amount:v,at,note,createdAt:new Date().toISOString()}), fmt(v)+" "+CUR+" withdrawn for "+r.name);
+: await write(()=>S.db.collection("withdrawals").add(Object.assign({month:k,chargeId:r.id,amount:v,at,note,createdAt:new Date().toISOString()},pt?{partId:pt.id}:{})), fmt(v)+" "+CUR+" withdrawn for "+(pt?pt.name:r.name));
 if(ok) closeSheet(); else $("w-go").disabled=false;
 });
 });
@@ -655,37 +679,81 @@ if(ok) closeSheet(); else $("s-go").disabled=false;
 function planEditorHtml(rows){
 return '<div id="pl-rows">'+rows.map(planRowHtml).join("")+'</div><button class="btn small" id="pl-add">+ Add a charge</button>';
 }
+function partRowHtml(pt){
+return '<div class="part-row" data-part="'+esc(pt.id)+'">'+
+'<input class="input" data-pf="name" aria-label="Part name" value="'+esc(pt.name)+'" placeholder="Part name">'+
+'<input class="input" data-pf="planned" aria-label="Part amount" inputmode="decimal" value="'+esc(pt.planned)+'" placeholder="0">'+
+'<button class="x" data-del-part>Remove</button></div>';
+}
 function planRowHtml(r){
-return '<div class="plan-row" data-row="'+esc(r.id)+'">'+
+const split=!!(r.parts&&r.parts.length);
+const total=split?sum(r.parts,x=>Number(x.planned)||0):r.planned;
+return '<div class="plan-row'+(split?' is-split':'')+'" data-row="'+esc(r.id)+'">'+
 '<input class="input" data-f="name" aria-label="Charge name" value="'+esc(r.name)+'" placeholder="Charge name">'+
-'<input class="input" data-f="planned" aria-label="Amount" inputmode="decimal" value="'+esc(r.planned)+'" placeholder="0">'+
+'<input class="input" data-f="planned" aria-label="Amount" inputmode="decimal" value="'+esc(total)+'" placeholder="0"'+(split?' readonly':'')+'>'+
 '<div class="wide"><select class="input" data-f="type" aria-label="Type">'+
 '<option value="fixed"'+(r.type!=="envelope"&&r.type!=="savings"?" selected":"")+'>Withdraw at once</option>'+
 '<option value="envelope"'+(r.type==="envelope"?" selected":"")+'>Envelope (withdraw in parts)</option>'+
 '<option value="savings"'+(r.type==="savings"?" selected":"")+'>Goes to savings</option></select>'+
-'<button class="x" data-del-row>Remove</button></div></div>';
+'<button class="x" data-split>'+(split?'+ Add part':'Split')+'</button><button class="x" data-del-row>Remove</button></div>'+
+'<div class="parts-edit">'+(split?r.parts.map(partRowHtml).join(""):"")+'</div></div>';
+}
+function splitRow(row){
+const amt=row.querySelector('[data-f="planned"]'), box=row.querySelector(".parts-edit"), d=document.createElement("div");
+if(!row.classList.contains("is-split")){
+d.innerHTML=partRowHtml({id:uid(),name:row.querySelector('[data-f="name"]').value.trim(),planned:amt.value})+partRowHtml({id:uid(),name:"",planned:""});
+row.classList.add("is-split"); amt.readOnly=true; row.querySelector("[data-split]").textContent="+ Add part";
+} else d.innerHTML=partRowHtml({id:uid(),name:"",planned:""});
+const added=[...d.children]; added.forEach(x=>box.appendChild(x)); added[added.length-1].querySelector("input").focus();
+}
+function syncSplit(row){
+const t=sum([...row.querySelectorAll('.part-row [data-pf="planned"]')],i=>num(i.value)||0);
+row.querySelector('[data-f="planned"]').value=t?String(t):"";
 }
 function bindPlanEditor(sh, onChange){
-const wire=row=>{
-row.querySelector("[data-del-row]").addEventListener("click",()=>{ row.remove(); onChange&&onChange(); });
-row.querySelectorAll("input,select").forEach(i=>i.addEventListener("input",()=>onChange&&onChange()));
-};
-sh.querySelectorAll(".plan-row").forEach(wire);
+const box=$("pl-rows");
+const changed=()=>{ box.querySelectorAll(".plan-row.is-split").forEach(syncSplit); onChange&&onChange(); };
+box.addEventListener("input",changed);
+box.addEventListener("click",e=>{
+const b=e.target.closest("button"); if(!b) return;
+const row=b.closest(".plan-row"); if(!row) return;
+if(b.hasAttribute("data-del-row")) row.remove();
+else if(b.hasAttribute("data-split")) splitRow(row);
+else if(b.hasAttribute("data-del-part")){
+b.closest(".part-row").remove();
+if(!row.querySelector(".part-row")){ row.classList.remove("is-split"); row.querySelector('[data-f="planned"]').readOnly=false; row.querySelector("[data-split]").textContent="Split"; }
+}
+changed();
+});
 $("pl-add").addEventListener("click",()=>{
 const d=document.createElement("div"); d.innerHTML=planRowHtml({id:uid(),name:"",planned:"",type:"fixed"});
-const row=d.firstChild; $("pl-rows").appendChild(row); wire(row); row.querySelector("input").focus(); onChange&&onChange();
+const row=d.firstChild; box.appendChild(row); row.querySelector("input").focus(); changed();
 });
 }
 function readPlan(){
 const out=[]; let err="";
 document.querySelectorAll("#pl-rows .plan-row").forEach(row=>{
 const name=row.querySelector('[data-f="name"]').value.trim();
-const p=num(row.querySelector('[data-f="planned"]').value||"0");
 const type=row.querySelector('[data-f="type"]').value;
+let parts=null;
+if(row.classList.contains("is-split")){
+parts=[];
+row.querySelectorAll(".part-row").forEach(pr=>{
+const pn=pr.querySelector('[data-pf="name"]').value.trim(), pp=num(pr.querySelector('[data-pf="planned"]').value||"0");
+if(!pn&&!(pp>0)) return;
+if(!pn) err=err||"Every part needs a name.";
+else if(isNaN(pp)||pp<0) err=err||"Check the amount for "+pn+".";
+parts.push({id:pr.dataset.part,name:pn,planned:isNaN(pp)?0:pp});
+});
+if(!parts.length) parts=null;
+}
+const p=parts?sum(parts,x=>x.planned):num(row.querySelector('[data-f="planned"]').value||"0");
 if(!name&&!(p>0)) return;
-if(!name) err="Every charge needs a name.";
-else if(isNaN(p)||p<0) err="Check the amount for "+name+".";
-out.push({id:row.dataset.row,name,planned:isNaN(p)?0:p,type});
+if(!name) err=err||"Every charge needs a name.";
+else if(isNaN(p)||p<0) err=err||"Check the amount for "+name+".";
+else if(parts&&type==="savings") err=err||"Savings can\u2019t be split. Remove the parts from "+name+".";
+const o={id:row.dataset.row,name,planned:isNaN(p)?0:p,type}; if(parts) o.parts=parts;
+out.push(o);
 });
 return {rows:out,err};
 }
@@ -706,6 +774,13 @@ if(err){ $("p-err").textContent=err; return; }
 const removed=(m.charges||[]).filter(c=>!rows.some(r=>r.id===c.id));
 const blocked=removed.find(c=>S.withdrawals.some(w=>w.month===k&&w.chargeId===c.id)||S.savings.some(e=>e.month===k&&e.chargeId===c.id));
 if(blocked){ $("p-err").textContent=blocked.name+" has withdrawals this month. Delete them from the log first, or keep the charge."; return; }
+for(const r of rows){
+const old=(m.charges||[]).find(c=>c.id===r.id); if(!old) continue;
+const W=S.withdrawals.filter(w=>w.month===k&&w.chargeId===r.id);
+if(r.parts&&!(old.parts&&old.parts.length)&&W.length){ $("p-err").textContent=r.name+" already has withdrawals this month. Split it next month, or delete them from the log first."; return; }
+const gone=(old.parts||[]).find(pt=>!(r.parts||[]).some(x=>x.id===pt.id)&&W.some(w=>w.partId===pt.id));
+if(gone){ $("p-err").textContent=r.name+" \u00b7 "+gone.name+" has withdrawals this month. Delete them from the log first, or keep it."; return; }
+}
 $("p-go").disabled=true;
 const nm=clone(m); nm.salary=s; nm.charges=rows;
 const ok=await write(()=>S.db.doc("months/"+k).set(nm),"Plan saved");
@@ -763,7 +838,7 @@ lines.push(["salary",k,"","Salary",m.salary,"",m.salaryOf?("Salary of "+m.salary
 (m.charges||[]).forEach(c=>lines.push(["plan",k,"",c.name,"",c.planned,c.type].map(csvCell).join(",")));
 });
 [...S.withdrawals].sort((a,b)=>(a.month+(a.at||"")).localeCompare(b.month+(b.at||""))).forEach(w=>{
-lines.push(["withdrawal",w.month,w.at||"",labelFor(S.months[w.month]||{},w.chargeId,w.note),w.amount,"",w.note||""].map(csvCell).join(","));
+lines.push(["withdrawal",w.month,w.at||"",labelFor(S.months[w.month]||{},w.chargeId,w.note,w.partId),w.amount,"",w.note||""].map(csvCell).join(","));
 });
 [...S.savings].sort((a,b)=>(a.month+(a.at||"")).localeCompare(b.month+(b.at||""))).forEach(e=>{
 lines.push(["savings_"+e.kind,e.month,e.at||"","Savings",e.amount,"",e.reason||""].map(csvCell).join(","));
